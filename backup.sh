@@ -9,11 +9,10 @@
 # Appends domain to backup filenames by querying the 'siteurl' from the wp_options table in the database.
 # Prompts the user to decide whether to include the wp-content/uploads directory in the files backup.
 # Performs a dry-run integrity check on the backup files after creation.
-# Checks for existing backups in the 'backups' directory. If multiple matching backup pairs exist, lists them for the user to select which one to restore.
+# Checks for existing backups in the 'backups' directory. If multiple matching backup pairs (backup-db and backup-files with the same suffix and timestamp) exist, lists them for the user to select which one to restore.
 # Before restoring, performs a dry-run integrity check on the selected backup files and displays success message for user reassurance.
 # During restore, prompts the user to choose whether to restore both DB and files, only DB, or only files.
 # Adds color formatting to messages for better visibility: green for success, red for errors, yellow for warnings/info.
-# File naming structure: backup-domain-db-timestamp.sql.gz and backup-domain-files-timestamp.tar.gz (where domain is from DOMAIN_SUFFIX without the leading hyphen in description).
 
 # Define colors
 RED='\e[1;31m'
@@ -71,23 +70,20 @@ else
     DOMAIN_SUFFIX=""
 fi
 
-# Escape special regex characters in DOMAIN_SUFFIX for sed pattern
-DOMAIN_SUFFIX_ESC=$(printf '%s' "$DOMAIN_SUFFIX" | sed 's/[\[\]\.^$*]/\\&/g')
-
 # Define backups directory
 BACKUP_DIR="backups"
 
 # Function to find all matching backup pairs, sorted by timestamp descending
 find_all_backup_pairs() {
     # List all db backups
-    DB_FILES=$(ls -1 "$BACKUP_DIR"/backup${DOMAIN_SUFFIX}-db-*.sql.gz 2>/dev/null | sort -r)
+    DB_FILES=$(ls -1 "$BACKUP_DIR"/backup-db"$DOMAIN_SUFFIX"-*.sql.gz 2>/dev/null | sort -r)
     if [ -z "$DB_FILES" ]; then
         return 1
     fi
     local PAIRS=()
     for DB_FILE in $DB_FILES; do
-        TIMESTAMP=$(basename "$DB_FILE" | sed -E "s/backup${DOMAIN_SUFFIX_ESC}-db-(.*)\.sql\.gz/\1/")
-        FILES_FILE="$BACKUP_DIR/backup${DOMAIN_SUFFIX}-files-${TIMESTAMP}.tar.gz"
+        TIMESTAMP=$(basename "$DB_FILE" | sed -E "s/backup-db${DOMAIN_SUFFIX}-(.*)\.sql\.gz/\1/")
+        FILES_FILE="$BACKUP_DIR/backup-files${DOMAIN_SUFFIX}-${TIMESTAMP}.tar.gz"
         if [ -f "$FILES_FILE" ]; then
             PAIRS+=("$DB_FILE:$FILES_FILE")
         fi
@@ -112,7 +108,7 @@ if [ -d "$BACKUP_DIR" ]; then
         for i in "${!PAIR_ARRAY[@]}"; do
             DB_FILE=$(echo "${PAIR_ARRAY[$i]}" | cut -d':' -f1)
             FILES_FILE=$(echo "${PAIR_ARRAY[$i]}" | cut -d':' -f2)
-            TIMESTAMP=$(basename "$DB_FILE" | sed -E "s/backup${DOMAIN_SUFFIX_ESC}-db-(.*)\.sql\.gz/\1/")
+            TIMESTAMP=$(basename "$DB_FILE" | sed -E "s/backup-db${DOMAIN_SUFFIX}-(.*)\.sql\.gz/\1/")
             echo -e "${YELLOW}$((i+1)). Timestamp: $TIMESTAMP${NC}"
             echo "   Database: $DB_FILE"
             echo "   Files: $FILES_FILE"
@@ -187,7 +183,11 @@ if [ -d "$BACKUP_DIR" ]; then
         else
             echo -e "${YELLOW}No restore selected. Proceeding with backup.${NC}"
         fi
+    else
+        echo -e "${YELLOW}Không có bản backup nào để khôi phục.${NC}"
     fi
+else
+    echo -e "${YELLOW}Thư mục backups không tồn tại. Không có bản backup nào để khôi phục.${NC}"
 fi
 
 # Prompt user for backing up uploads directory
@@ -207,7 +207,7 @@ mkdir -p "$BACKUP_DIR"
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 
 # Backup database using mysqldump and compress with gzip
-DB_BACKUP_FILE="$BACKUP_DIR/backup${DOMAIN_SUFFIX}-db-$TIMESTAMP.sql.gz"
+DB_BACKUP_FILE="$BACKUP_DIR/backup-db$DOMAIN_SUFFIX-$TIMESTAMP.sql.gz"
 mysqldump -u "$DB_USER" -p"$DB_PASSWORD" -h "$HOST" -P "$PORT" "$DB_NAME" | gzip > "$DB_BACKUP_FILE"
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}Compressed database backup created: $DB_BACKUP_FILE${NC}"
@@ -217,7 +217,7 @@ else
 fi
 
 # Backup files (exclude the backups directory to avoid recursion, and optionally exclude uploads)
-FILES_BACKUP_FILE="$BACKUP_DIR/backup${DOMAIN_SUFFIX}-files-$TIMESTAMP.tar.gz"
+FILES_BACKUP_FILE="$BACKUP_DIR/backup-files$DOMAIN_SUFFIX-$TIMESTAMP.tar.gz"
 tar -czf "$FILES_BACKUP_FILE" --exclude="$BACKUP_DIR" $EXCLUDE_UPLOADS .
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}Files backup created: $FILES_BACKUP_FILE${NC}"
